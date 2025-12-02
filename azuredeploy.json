@@ -1,0 +1,107 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "functionAppName": { "type": "string" },
+    "location": { "type": "string", "defaultValue": "[resourceGroup().location]" },
+    "storageAccountName": { "type": "string" },
+    "skuName": { "type": "string", "defaultValue": "Y1" },
+    "appServicePlanName": { "type": "string" },
+    "aiName": { "type": "string" },
+    "partnerRegistrationName": { "type": "string", "defaultValue": "graphPartnerRegistration" },
+    "partnerTopicName": { "type": "string", "defaultValue": "graphPartnerTopic" }
+  },
+  "variables": {
+    "functionWorkerRuntime": "node",
+    "nodeVersion": "~18"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2022-09-01",
+      "name": "[parameters('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "Standard_LRS" },
+      "kind": "StorageV2",
+      "properties": {}
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2022-03-01",
+      "name": "[parameters('appServicePlanName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "[parameters('skuName')]" },
+      "properties": {
+        "reserved": true,
+        "isXenon": false
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02-preview",
+      "name": "[parameters('aiName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "Basic" },
+      "properties": {}
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-03-01",
+      "name": "[parameters('functionAppName')]",
+      "location": "[parameters('location')]",
+      "kind": "functionapp,linux",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+        "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+        "[resourceId('Microsoft.Insights/components', parameters('aiName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+        "siteConfig": {
+          "appSettings": [
+            { "name": "FUNCTIONS_WORKER_RUNTIME", "value": "[variables('functionWorkerRuntime')]" },
+            { "name": "WEBSITE_RUN_FROM_PACKAGE", "value": "1" },
+            { "name": "WEBSITE_NODE_DEFAULT_VERSION", "value": "[variables('nodeVersion')]" },
+            { "name": "APPINSIGHTS_INSTRUMENTATIONKEY", "value": "[reference(resourceId('Microsoft.Insights/components', parameters('aiName'))).InstrumentationKey]" },
+            { "name": "AzureWebJobsStorage", "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2022-09-01').keys[0].value, ';EndpointSuffix=core.windows.net')]" }
+          ]
+        }
+      }
+    },
+
+    /* Partner registration placeholder (customer-side partner config)
+       Note: customer-side partner configuration might require specific API/permission context;
+       include a basic resource so infra is ready. */
+    {
+      "type": "Microsoft.EventGrid/partnerRegistrations",
+      "apiVersion": "2024-06-01",
+      "name": "[parameters('partnerRegistrationName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "partnerName": "GRAPH_PARTNER_PLACEHOLDER",
+        "provisioningState": "Succeeded"
+      }
+    },
+
+    /* Partner Topic (created in this resource group) - partner/authorized flow required */
+    {
+      "type": "Microsoft.EventGrid/partnerTopics",
+      "apiVersion": "2024-06-01",
+      "name": "[parameters('partnerTopicName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/partnerRegistrations', parameters('partnerRegistrationName'))]"
+      ],
+      "properties": {
+        "partnerRegistration": "[resourceId('Microsoft.EventGrid/partnerRegistrations', parameters('partnerRegistrationName'))]",
+        "provisioningState": "Succeeded"
+      }
+    }
+
+  ],
+  "outputs": {
+    "functionAppNameOut": { "type": "string", "value": "[parameters('functionAppName')]" },
+    "functionAppDefaultHostName": { "type": "string", "value": "[reference(resourceId('Microsoft.Web/sites', parameters('functionAppName'))).defaultHostName]" },
+    "partnerTopicId": { "type": "string", "value": "[resourceId('Microsoft.EventGrid/partnerTopics', parameters('partnerTopicName'))]" }
+  }
+}
